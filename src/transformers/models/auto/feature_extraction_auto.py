@@ -67,6 +67,7 @@ FEATURE_EXTRACTOR_MAPPING_NAMES = OrderedDict(
         ("resnet", "ConvNextFeatureExtractor"),
         ("segformer", "SegformerFeatureExtractor"),
         ("speech_to_text", "Speech2TextFeatureExtractor"),
+        ("speecht5", "SpeechT5FeatureExtractor"),
         ("swin", "ViTFeatureExtractor"),
         ("swinv2", "ViTFeatureExtractor"),
         ("van", "ConvNextFeatureExtractor"),

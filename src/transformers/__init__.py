@@ -329,6 +329,14 @@ _import_structure = {
         "Speech2Text2Processor",
         "Speech2Text2Tokenizer",
     ],
+    "models.speecht5": [
+        "SPEECHT5_PRETRAINED_CONFIG_ARCHIVE_MAP",
+        "SpeechT5Config",
+        "SpeechT5FeatureExtractor",
+        "SpeechT5Processor",
+        "SpeechT5Tokenizer",
+        "SpeechT5Tokenizer",
+    ],
     "models.splinter": ["SPLINTER_PRETRAINED_CONFIG_ARCHIVE_MAP", "SplinterConfig", "SplinterTokenizer"],
     "models.squeezebert": ["SQUEEZEBERT_PRETRAINED_CONFIG_ARCHIVE_MAP", "SqueezeBertConfig", "SqueezeBertTokenizer"],
     "models.swin": ["SWIN_PRETRAINED_CONFIG_ARCHIVE_MAP", "SwinConfig"],
@@ -2061,6 +2069,18 @@ else:
             "Wav2Vec2PreTrainedModel",
         ]
     )
+    _import_structure["models.speecht5"].extend(
+        [
+            "SPEECHT5_PRETRAINED_MODEL_ARCHIVE_LIST",
+            "SpeechT5ForAudioFrameClassification",
+            "SpeechT5ForCTC",
+            "SpeechT5ForPreTraining",
+            "SpeechT5ForSequenceClassification",
+            "SpeechT5ForXVector",
+            "SpeechT5Model",
+            "SpeechT5PreTrainedModel",
+        ]
+    )
     _import_structure["models.wav2vec2_conformer"].extend(
         [
             "WAV2VEC2_CONFORMER_PRETRAINED_MODEL_ARCHIVE_LIST",
@@ -3321,6 +3341,13 @@ if TYPE_CHECKING:
         Speech2Text2Config,
         Speech2Text2Processor,
         Speech2Text2Tokenizer,
+    )
+    from .models.speecht5 import (
+        SPEECHT5_PRETRAINED_CONFIG_ARCHIVE_MAP,
+        SpeechT5Config,
+        SpeechT5FeatureExtractor,
+        SpeechT5Processor,
+        SpeechT5Tokenizer,
     )
     from .models.splinter import SPLINTER_PRETRAINED_CONFIG_ARCHIVE_MAP, SplinterConfig, SplinterTokenizer
     from .models.squeezebert import SQUEEZEBERT_PRETRAINED_CONFIG_ARCHIVE_MAP, SqueezeBertConfig, SqueezeBertTokenizer
@@ -4596,6 +4623,16 @@ if TYPE_CHECKING:
             Speech2TextPreTrainedModel,
         )
         from .models.speech_to_text_2 import Speech2Text2ForCausalLM, Speech2Text2PreTrainedModel
+        from .models.speecht5 import (
+            SPEECHT5_PRETRAINED_MODEL_ARCHIVE_LIST,
+            SpeechT5ForAudioFrameClassification,
+            SpeechT5ForCTC,
+            SpeechT5ForPreTraining,
+            SpeechT5ForSequenceClassification,
+            SpeechT5ForXVector,
+            SpeechT5Model,
+            SpeechT5PreTrainedModel,
+        )
         from .models.splinter import (
             SPLINTER_PRETRAINED_MODEL_ARCHIVE_LIST,
             SplinterForPreTraining,
