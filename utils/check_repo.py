@@ -112,6 +112,10 @@ IGNORE_NON_TESTED = PRIVATE_MODELS.copy() + [
     "FlaxBertForCausalLM",  # Building part of bigger (tested) model. Tested implicitly through FlaxRobertaForCausalLM.
     "OPTDecoderWrapper",
     "TFSegformerDecodeHead",  # Not a regular model.
+    "SpeechT5Encoder",  # Building part of bigger (tested) model.
+    "SpeechT5SpeechEncoder",  # Building part of bigger (tested) model.
+    "SpeechT5Decoder",  # Building part of bigger (tested) model.
+    "SpeechT5TextDecoder",  # Building part of bigger (tested) model.
 ]
 
 # Update this list with test files that don't have a tester with a `all_model_classes` variable and which don't
