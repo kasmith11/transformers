@@ -114,7 +114,9 @@ IGNORE_NON_TESTED = PRIVATE_MODELS.copy() + [
     "TFSegformerDecodeHead",  # Not a regular model.
     "SpeechT5Encoder",  # Building part of bigger (tested) model.
     "SpeechT5SpeechEncoder",  # Building part of bigger (tested) model.
+    "SpeechT5TextEncoder",  # Building part of bigger (tested) model.
     "SpeechT5Decoder",  # Building part of bigger (tested) model.
+    "SpeechT5SpeechDecoder",  # Building part of bigger (tested) model.
     "SpeechT5TextDecoder",  # Building part of bigger (tested) model.
 ]
 
