@@ -61,9 +61,9 @@ ListOfDict = List[Dict[str, Union[int, str]]]
 
 
 @dataclass
-class SpeechT5CTCTokenizerOutput(ModelOutput):
+class SpeechT5TokenizerOutput(ModelOutput):
     """
-    Output type of [` SpeechT5CTCTokenizer`], with transcription.
+    Output type of [` SpeechT5Tokenizer`], with transcription.
 
     Args:
         text (list of `str` or `str`):
@@ -82,7 +82,7 @@ class SpeechT5CTCTokenizerOutput(ModelOutput):
     word_offsets: Union[List[ListOfDict], ListOfDict] = None
 
 #copied from transformers/models/t5/tokenization_t5.py with t5 -> speecht5
-class SpeechT5CTCTokenizer(PreTrainedTokenizer):
+class SpeechT5Tokenizer(PreTrainedTokenizer):
 
     """
     Construct a SpeechT5 tokenizer. Based on [SentencePiece](https://github.com/google/sentencepiece).
@@ -177,8 +177,8 @@ class SpeechT5CTCTokenizer(PreTrainedTokenizer):
 
     @staticmethod
     def _eventually_correct_t5_max_length(pretrained_model_name_or_path, max_model_length, init_max_model_length):
-        if pretrained_model_name_or_path in SpeechT5CTCTokenizer.max_model_input_sizes:
-            deprecated_max_model_length = SpeechT5CTCTokenizer.max_model_input_sizes[pretrained_model_name_or_path]
+        if pretrained_model_name_or_path in SpeechT5Tokenizer.max_model_input_sizes:
+            deprecated_max_model_length = SpeechT5Tokenizer.max_model_input_sizes[pretrained_model_name_or_path]
             if init_max_model_length is not None and init_max_model_length != max_model_length:
                 return init_max_model_length
             elif init_max_model_length is None:

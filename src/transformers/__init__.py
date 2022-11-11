@@ -332,7 +332,7 @@ _import_structure = {
     "models.speecht5": [
         "SPEECHT5_PRETRAINED_CONFIG_ARCHIVE_MAP",
         "SpeechT5Config",
-        "SpeechT5CTCTokenizer",
+        "SpeechT5Tokenizer",
         "SpeechT5Processor",
     ],
     "models.splinter": ["SPLINTER_PRETRAINED_CONFIG_ARCHIVE_MAP", "SplinterConfig", "SplinterTokenizer"],
@@ -3342,7 +3342,7 @@ if TYPE_CHECKING:
     from .models.speecht5 import (
         SPEECHT5_PRETRAINED_CONFIG_ARCHIVE_MAP,
         SpeechT5Config,
-        SpeechT5CTCTokenizer,
+        SpeechT5Tokenizer,
         SpeechT5Processor,
     )
     from .models.splinter import SPLINTER_PRETRAINED_CONFIG_ARCHIVE_MAP, SplinterConfig, SplinterTokenizer

@@ -23,7 +23,7 @@ from ...utils import OptionalDependencyNotAvailable, _LazyModule, is_torch_avail
 _import_structure = {
     "configuration_speecht5": ["SPEECHT5_PRETRAINED_CONFIG_ARCHIVE_MAP", "SpeechT5Config"],
     "processing_speecht5": ["SpeechT5Processor"],
-    "tokenization_speecht5": ["SpeechT5CTCTokenizer"],
+    "tokenization_speecht5": ["SpeechT5Tokenizer"],
 }
 
 
@@ -46,7 +46,7 @@ else:
 if TYPE_CHECKING:
     from .configuration_speecht5 import SPEECHT5_PRETRAINED_CONFIG_ARCHIVE_MAP, SpeechT5Config
     from .processing_speecht5 import SpeechT5Processor
-    from .tokenization_speecht5 import SpeechT5CTCTokenizer
+    from .tokenization_speecht5 import SpeechT5Tokenizer
 
     try:
         if not is_torch_available():
