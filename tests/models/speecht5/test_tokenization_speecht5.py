@@ -15,440 +15,369 @@
 """Tests for the SpeechT5 tokenizer."""
 import json
 import os
-import random
 import tempfile
 import unittest
 
-from transformers import SpeechT5CTCTokenizer
-from transformers.models.speecht5.tokenization_speecht5 import VOCAB_FILES_NAMES, SpeechT5CTCTokenizerOutput
+from transformers import SPIECE_UNDERLINE, AddedToken, BatchEncoding, SpeechT5Tokenizer, T5TokenizerFast
+from transformers.testing_utils import get_tests_dir, require_sentencepiece, require_tokenizers, slow
+from transformers.utils import cached_property, is_tf_available, is_torch_available
 
 from ...test_tokenization_common import TokenizerTesterMixin
 
 
-global_rng = random.Random()
+SAMPLE_VOCAB = get_tests_dir("fixtures/test_sentencepiece.model")
+
+if is_torch_available():
+    FRAMEWORK = "pt"
+elif is_tf_available():
+    FRAMEWORK = "tf"
+else:
+    FRAMEWORK = "jax"
 
 
-def floats_list(shape, scale=1.0, rng=None, name=None):
-    """Creates a random float32 tensor"""
-    if rng is None:
-        rng = global_rng
+@require_sentencepiece
+@require_tokenizers
+class SpeechT5TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
 
-    values = []
-    for batch_idx in range(shape[0]):
-        values.append([])
-        for _ in range(shape[1]):
-            values[-1].append(rng.random() * scale)
-
-    return values
-
-
-class SpeechT5CTCTokenizerTest(TokenizerTesterMixin, unittest.TestCase):
-    tokenizer_class = SpeechT5CTCTokenizer
+    tokenizer_class = SpeechT5Tokenizer
+    rust_tokenizer_class = T5TokenizerFast
     test_rust_tokenizer = False
+    test_sentencepiece = True
 
     def setUp(self):
         super().setUp()
 
-        vocab = "<pad> <s> </s> <unk> | E T A O N I H S R D L U M W C F G Y P B V K ' X J Q Z".split(" ")
-        vocab_tokens = dict(zip(vocab, range(len(vocab))))
+        # We have a SentencePiece fixture for testing
+        tokenizer = SpeechT5Tokenizer(SAMPLE_VOCAB)
+        tokenizer.save_pretrained(self.tmpdirname)
 
-        self.special_tokens_map = {"pad_token": "<pad>", "unk_token": "<unk>", "bos_token": "<s>", "eos_token": "</s>"}
+    def test_convert_token_and_id(self):
+        """Test ``_convert_token_to_id`` and ``_convert_id_to_token``."""
+        token = "<s>"
+        token_id = 1
 
-        self.tmpdirname = tempfile.mkdtemp()
-        self.vocab_file = os.path.join(self.tmpdirname, VOCAB_FILES_NAMES["vocab_file"])
-        with open(self.vocab_file, "w", encoding="utf-8") as fp:
-            fp.write(json.dumps(vocab_tokens) + "\n")
+        self.assertEqual(self.get_tokenizer()._convert_token_to_id(token), token_id)
+        self.assertEqual(self.get_tokenizer()._convert_id_to_token(token_id), token)
 
-    def get_tokenizer(self, **kwargs):
-        kwargs.update(self.special_tokens_map)
-        return SpeechT5CTCTokenizer.from_pretrained(self.tmpdirname, **kwargs)
+    def test_get_vocab(self):
+        vocab_keys = list(self.get_tokenizer().get_vocab().keys())
 
-    def test_tokenizer_add_token_chars(self):
-        tokenizer = self.tokenizer_class.from_pretrained("TODO")
+        self.assertEqual(vocab_keys[0], "<unk>")
+        self.assertEqual(vocab_keys[1], "<s>")
+        self.assertEqual(vocab_keys[-1], "<pad>")
+        self.assertEqual(len(vocab_keys), 1_101)
 
-        # check adding a single token
-        tokenizer.add_tokens("x")
-        token_ids = tokenizer("C x A").input_ids
-        self.assertEqual(token_ids, [19, 4, 32, 4, 7])
+    def test_vocab_size(self):
+        self.assertEqual(self.get_tokenizer().vocab_size, 1_100)
 
-        tokenizer.add_tokens(["a", "b", "c"])
-        token_ids = tokenizer("C a A c").input_ids
-        self.assertEqual(token_ids, [19, 4, 33, 4, 7, 4, 35])
+    def test_full_tokenizer(self):
+        tokenizer = SpeechT5Tokenizer(SAMPLE_VOCAB)
 
-        tokenizer.add_tokens(["a", "b", "c"])
-        token_ids = tokenizer("CaA c").input_ids
-        self.assertEqual(token_ids, [19, 33, 7, 4, 35])
+        tokens = tokenizer.tokenize("This is a test")
+        self.assertListEqual(tokens, ["▁This", "▁is", "▁a", "▁t", "est"])
 
-    def test_tokenizer_add_token_words(self):
-        tokenizer = self.tokenizer_class.from_pretrained("TODO")
+        self.assertListEqual(tokenizer.convert_tokens_to_ids(tokens), [285, 46, 10, 170, 382])
 
-        # check adding a single token
-        tokenizer.add_tokens("xxx")
-        token_ids = tokenizer("C xxx A B").input_ids
-        self.assertEqual(token_ids, [19, 4, 32, 4, 7, 4, 24])
-
-        tokenizer.add_tokens(["aaa", "bbb", "ccc"])
-        token_ids = tokenizer("C aaa A ccc B B").input_ids
-        self.assertEqual(token_ids, [19, 4, 33, 4, 7, 4, 35, 4, 24, 4, 24])
-
-        tokenizer.add_tokens(["aaa", "bbb", "ccc"])
-        token_ids = tokenizer("CaaaA ccc B B").input_ids
-        self.assertEqual(token_ids, [19, 33, 7, 4, 35, 4, 24, 4, 24])
-
-    def test_tokenizer_decode(self):
-        tokenizer = self.tokenizer_class.from_pretrained("TODO")
-
-        sample_ids = [
-            [11, 5, 15, tokenizer.pad_token_id, 15, 8, 98],
-            [24, 22, 5, tokenizer.word_delimiter_token_id, 24, 22, 5, 77],
-        ]
-        tokens = tokenizer.decode(sample_ids[0])
-        batch_tokens = tokenizer.batch_decode(sample_ids)
-        self.assertEqual(tokens, batch_tokens[0])
-        self.assertEqual(batch_tokens, ["HELLO<unk>", "BYE BYE<unk>"])
-
-    def test_tokenizer_decode_special(self):
-        tokenizer = self.tokenizer_class.from_pretrained("TODO")
-
-        # fmt: off
-        sample_ids = [
-            [11, 5, 15, tokenizer.pad_token_id, 15, 8, 98],
-            [24, 22, 5, tokenizer.word_delimiter_token_id, 24, 22, 5, 77],
-        ]
-        sample_ids_2 = [
-            [11, 5, 5, 5, 5, 5, 15, 15, 15, tokenizer.pad_token_id, 15, 8, 98],
-            [24, 22, 5, tokenizer.pad_token_id, tokenizer.pad_token_id, tokenizer.pad_token_id, tokenizer.word_delimiter_token_id, 24, 22, 5, 77, tokenizer.word_delimiter_token_id],
-        ]
-        # fmt: on
-
-        batch_tokens = tokenizer.batch_decode(sample_ids)
-        batch_tokens_2 = tokenizer.batch_decode(sample_ids_2)
-        self.assertEqual(batch_tokens, batch_tokens_2)
-        self.assertEqual(batch_tokens, ["HELLO<unk>", "BYE BYE<unk>"])
-
-    def test_tokenizer_decode_added_tokens(self):
-        tokenizer = self.tokenizer_class.from_pretrained("TODO")
-        tokenizer.add_tokens(["!", "?"])
-        tokenizer.add_special_tokens({"cls_token": "$$$"})
-
-        # fmt: off
-        sample_ids = [
-            [11, 5, 15, tokenizer.pad_token_id, 15, 8, 98, 32, 32, 33, tokenizer.word_delimiter_token_id, 32, 32, 33, 34, 34],
-            [24, 22, 5, tokenizer.word_delimiter_token_id, 24, 22, 5, 77, tokenizer.pad_token_id, 34, 34],
-        ]
-        # fmt: on
-        batch_tokens = tokenizer.batch_decode(sample_ids)
-
-        self.assertEqual(batch_tokens, ["HELLO<unk>!?!?$$$", "BYE BYE<unk>$$$"])
-
-    def test_special_characters_in_vocab(self):
-        sent = "ʈʰ æ æ̃ ˧ kʰ"
-
-        vocab_dict = {k: v for v, k in enumerate({phoneme for phoneme in sent.split()})}
-        vocab_file = os.path.join(self.tmpdirname, "vocab_special.json")
-
-        with open(vocab_file, "w") as f:
-            json.dump(vocab_dict, f)
-
-        tokenizer = SpeechT5CTCTokenizer(vocab_file)
-
-        expected_sent = tokenizer.decode(tokenizer(sent).input_ids, spaces_between_special_tokens=True)
-        self.assertEqual(sent, expected_sent)
-
-        tokenizer.save_pretrained(os.path.join(self.tmpdirname, "special_tokenizer"))
-        tokenizer = SpeechT5CTCTokenizer.from_pretrained(os.path.join(self.tmpdirname, "special_tokenizer"))
-
-        expected_sent = tokenizer.decode(tokenizer(sent).input_ids, spaces_between_special_tokens=True)
-        self.assertEqual(sent, expected_sent)
-
-    @staticmethod
-    def get_from_offsets(offsets, key):
-        retrieved_list = [d[key] for d in offsets]
-        return retrieved_list
-
-    def test_offsets(self):
-        tokenizer = self.get_tokenizer()
-
-        # fmt: off
-        # HEEEEE||LLL<pad>LO<unk> => HE LLO<unk>
-        # 1H + 5E + 2| + 3L + 1<pad> + 1L + 1O + 1<unk>
-        sample_ids = [11, 5, 5, 5, 5, 5, 4, 4, 15, 15, 15, tokenizer.pad_token_id, 15, 8, 98]
-        # fmt: on
-
-        outputs_char = tokenizer.decode(sample_ids, output_char_offsets=True)
-        # check SpeechT5CTCTokenizerOutput keys for char
-        self.assertEqual(len(outputs_char.keys()), 2)
-        self.assertTrue("text" in outputs_char)
-        self.assertTrue("char_offsets" in outputs_char)
-        self.assertTrue(isinstance(outputs_char, SpeechT5CTCTokenizerOutput))
-
-        outputs_word = tokenizer.decode(sample_ids, output_word_offsets=True)
-        # check SpeechT5CTCTokenizerOutput keys for word
-        self.assertEqual(len(outputs_word.keys()), 2)
-        self.assertTrue("text" in outputs_word)
-        self.assertTrue("word_offsets" in outputs_word)
-        self.assertTrue(isinstance(outputs_word, SpeechT5CTCTokenizerOutput))
-
-        outputs = tokenizer.decode(sample_ids, output_char_offsets=True, output_word_offsets=True)
-        # check SpeechT5CTCTokenizerOutput keys for both
-        self.assertEqual(len(outputs.keys()), 3)
-        self.assertTrue("text" in outputs)
-        self.assertTrue("char_offsets" in outputs)
-        self.assertTrue("word_offsets" in outputs)
-        self.assertTrue(isinstance(outputs, SpeechT5CTCTokenizerOutput))
-
-        # check that order of chars is correct and identical for both outputs
-        self.assertEqual("".join(self.get_from_offsets(outputs["char_offsets"], "char")), outputs.text)
-        self.assertEqual(
-            self.get_from_offsets(outputs["char_offsets"], "char"), ["H", "E", " ", "L", "L", "O", "<unk>"]
-        )
+        tokens = tokenizer.tokenize("I was born in 92000, and this is falsé.")
         self.assertListEqual(
-            self.get_from_offsets(outputs["char_offsets"], "char"),
-            self.get_from_offsets(outputs_char["char_offsets"], "char"),
+            tokens,
+            [
+                SPIECE_UNDERLINE + "I",
+                SPIECE_UNDERLINE + "was",
+                SPIECE_UNDERLINE + "b",
+                "or",
+                "n",
+                SPIECE_UNDERLINE + "in",
+                SPIECE_UNDERLINE + "",
+                "9",
+                "2",
+                "0",
+                "0",
+                "0",
+                ",",
+                SPIECE_UNDERLINE + "and",
+                SPIECE_UNDERLINE + "this",
+                SPIECE_UNDERLINE + "is",
+                SPIECE_UNDERLINE + "f",
+                "al",
+                "s",
+                "é",
+                ".",
+            ],
         )
+        ids = tokenizer.convert_tokens_to_ids(tokens)
+        self.assertListEqual(ids, [8, 21, 84, 55, 24, 19, 7, 0, 602, 347, 347, 347, 3, 12, 66, 46, 72, 80, 6, 0, 4])
 
-        # check that order of words is correct and identical to both outputs
-        self.assertEqual(" ".join(self.get_from_offsets(outputs["word_offsets"], "word")), outputs.text)
-        self.assertListEqual(self.get_from_offsets(outputs["word_offsets"], "word"), ["HE", "LLO<unk>"])
+        back_tokens = tokenizer.convert_ids_to_tokens(ids)
         self.assertListEqual(
-            self.get_from_offsets(outputs["word_offsets"], "word"),
-            self.get_from_offsets(outputs_word["word_offsets"], "word"),
+            back_tokens,
+            [
+                SPIECE_UNDERLINE + "I",
+                SPIECE_UNDERLINE + "was",
+                SPIECE_UNDERLINE + "b",
+                "or",
+                "n",
+                SPIECE_UNDERLINE + "in",
+                SPIECE_UNDERLINE + "",
+                "<unk>",
+                "2",
+                "0",
+                "0",
+                "0",
+                ",",
+                SPIECE_UNDERLINE + "and",
+                SPIECE_UNDERLINE + "this",
+                SPIECE_UNDERLINE + "is",
+                SPIECE_UNDERLINE + "f",
+                "al",
+                "s",
+                "<unk>",
+                ".",
+            ],
         )
 
-        # check that offsets are actually correct for char
-        # 0 is H, 1 is E, 6 is | (" "),  8 is 1st L,  12 is 2nd L, 13 is O, 14 is <unk>
-        self.assertListEqual(self.get_from_offsets(outputs["char_offsets"], "start_offset"), [0, 1, 6, 8, 12, 13, 14])
-        # 1 is H, 6 is E, 8 is | (" "),  11 is 1st L (note due to <pad>
-        # different begin of 2nd L), 13 is 2nd L, 14 is O, 15 is <unk>
-        self.assertListEqual(self.get_from_offsets(outputs["char_offsets"], "end_offset"), [1, 6, 8, 11, 13, 14, 15])
+    @cached_property
+    def speecht5_base_tokenizer(self):
+        return SpeechT5Tokenizer.from_pretrained("/home/ksmith/HuggingFace/SpeechT5/tokenizer/")
 
-        # check that offsets are actually correct for word
-        # H is at 1st position of first word, first L is at 8th position of second word
-        self.assertListEqual(self.get_from_offsets(outputs["word_offsets"], "start_offset"), [0, 8])
-        # last E is at 6th position of first word, first L is at last (15th) position of second word
-        self.assertListEqual(self.get_from_offsets(outputs["word_offsets"], "end_offset"), [6, 15])
+    @cached_property
+    def t5_base_tokenizer_fast(self):
+        return T5TokenizerFast.from_pretrained("t5-base")
 
-    def test_word_offsets_from_char_offsets(self):
+    def get_tokenizer(self, **kwargs) -> SpeechT5Tokenizer:
+        return self.tokenizer_class.from_pretrained(self.tmpdirname, pad_token=None, **kwargs)
+
+    def get_rust_tokenizer(self, **kwargs) -> T5TokenizerFast:
+        return self.rust_tokenizer_class.from_pretrained(self.tmpdirname, pad_token=None, **kwargs)
+
+    def test_rust_and_python_full_tokenizers(self):
+        if not self.test_rust_tokenizer:
+            return
+
         tokenizer = self.get_tokenizer()
+        rust_tokenizer = self.get_rust_tokenizer()
 
-        char_offsets = [
-            {"char": "H", "start_offset": 0, "end_offset": 1},
-            {"char": "I", "start_offset": 1, "end_offset": 2},
-            {"char": " ", "start_offset": 2, "end_offset": 3},
-            {"char": "L", "start_offset": 3, "end_offset": 4},
-            {"char": "I", "start_offset": 4, "end_offset": 5},
+        sequence = "I was born in 92000, and this is falsé."
+
+        tokens = tokenizer.tokenize(sequence)
+        rust_tokens = rust_tokenizer.tokenize(sequence)
+        self.assertListEqual(tokens, rust_tokens)
+
+        ids = tokenizer.encode(sequence, add_special_tokens=False)
+        rust_ids = rust_tokenizer.encode(sequence, add_special_tokens=False)
+        self.assertListEqual(ids, rust_ids)
+
+        rust_tokenizer = self.get_rust_tokenizer()
+        ids = tokenizer.encode(sequence)
+        rust_ids = rust_tokenizer.encode(sequence)
+        self.assertListEqual(ids, rust_ids)
+
+    def test_eos_treatment(self):
+        tokenizer = self.speecht5_base_tokenizer
+        batch_with_eos_added = tokenizer(["hi</s>", "I went to the gym</s>", "</s>"])
+        batch_without_eos_added = tokenizer(["hi", "I went to the gym", ""])
+        self.assertListEqual(batch_with_eos_added["input_ids"], batch_without_eos_added["input_ids"])
+
+    def test_prepare_batch(self):
+        tokenizer = self.speecht5_base_tokenizer
+        src_text = ["A long paragraph for summarization.", "Another paragraph for summarization."]
+        expected_src_tokens = [71, 307, 8986, 21, 4505, 1635, 1707, 5, tokenizer.eos_token_id]
+        batch = tokenizer(src_text, padding=True, return_tensors=FRAMEWORK)
+        self.assertIsInstance(batch, BatchEncoding)
+
+        if FRAMEWORK != "jax":
+            result = list(batch.input_ids.numpy()[0])
+        else:
+            result = list(batch.input_ids.tolist()[0])
+
+        self.assertListEqual(expected_src_tokens, result)
+
+        self.assertEqual((2, 9), batch.input_ids.shape)
+        self.assertEqual((2, 9), batch.attention_mask.shape)
+
+    def test_empty_target_text(self):
+        tokenizer = self.speecht5_base_tokenizer
+        src_text = ["A long paragraph for summarization.", "Another paragraph for summarization."]
+        batch = tokenizer(src_text, padding=True, return_tensors=FRAMEWORK)
+        # check if input_ids are returned and no decoder_input_ids
+        self.assertIn("input_ids", batch)
+        self.assertIn("attention_mask", batch)
+        self.assertNotIn("decoder_input_ids", batch)
+        self.assertNotIn("decoder_attention_mask", batch)
+
+    def test_max_length(self):
+        tokenizer = self.speecht5_base_tokenizer
+        tgt_text = [
+            "Summary of the text.",
+            "Another summary.",
         ]
-        word_offsets = tokenizer._get_word_offsets(char_offsets, tokenizer.replace_word_delimiter_char)
-
-        self.assertEqual(
-            word_offsets,
-            [{"word": "HI", "start_offset": 0, "end_offset": 2}, {"word": "LI", "start_offset": 3, "end_offset": 5}],
+        targets = tokenizer(
+            text_target=tgt_text, max_length=32, padding="max_length", truncation=True, return_tensors=FRAMEWORK
         )
+        self.assertEqual(32, targets["input_ids"].shape[1])
 
-        # Double spaces don't get counted
-        char_offsets = [
-            {"char": " ", "start_offset": 0, "end_offset": 1},
-            {"char": "H", "start_offset": 1, "end_offset": 2},
-            {"char": "I", "start_offset": 2, "end_offset": 3},
-            {"char": " ", "start_offset": 3, "end_offset": 4},
-            {"char": " ", "start_offset": 4, "end_offset": 5},
-            {"char": "L", "start_offset": 5, "end_offset": 6},
-            {"char": "I", "start_offset": 6, "end_offset": 7},
-            {"char": "I", "start_offset": 7, "end_offset": 8},
-            {"char": " ", "start_offset": 8, "end_offset": 9},
-            {"char": " ", "start_offset": 9, "end_offset": 10},
-        ]
-        word_offsets = tokenizer._get_word_offsets(char_offsets, tokenizer.replace_word_delimiter_char)
-        self.assertEqual(
-            word_offsets,
-            [{"word": "HI", "start_offset": 1, "end_offset": 3}, {"word": "LII", "start_offset": 5, "end_offset": 8}],
+    def test_outputs_not_longer_than_maxlen(self):
+        tokenizer = self.speecht5_base_tokenizer
+
+        batch = tokenizer(
+            ["I am a small frog" * 1000, "I am a small frog"], padding=True, truncation=True, return_tensors=FRAMEWORK
         )
+        self.assertIsInstance(batch, BatchEncoding)
+        # Since T5 does NOT have a max input length,
+        # this test should be changed to the following in Transformers v5:
+        # self.assertEqual(batch.input_ids.shape, (2, 8001))
+        self.assertEqual(batch.input_ids.shape, (2, 8001)) #512
 
-    def test_offsets_batch(self):
-        tokenizer = self.get_tokenizer()
+    def test_eos_in_input(self):
+        tokenizer = self.speecht5_base_tokenizer
+        src_text = ["A long paragraph for summarization. </s>"]
+        tgt_text = ["Summary of the text. </s>"]
+        expected_src_tokens = [71, 307, 8986, 21, 4505, 1635, 1707, 5, 1]
+        expected_tgt_tokens = [20698, 13, 8, 1499, 5, 1]
 
-        def check_list_tuples_equal(outputs_batch, outputs_list):
-            self.assertTrue(isinstance(outputs_batch, SpeechT5CTCTokenizerOutput))
-            self.assertTrue(isinstance(outputs_list[0], SpeechT5CTCTokenizerOutput))
+        batch = tokenizer(src_text, text_target=tgt_text)
 
-            # transform list to ModelOutput
-            outputs_batch_2 = SpeechT5CTCTokenizerOutput({k: [d[k] for d in outputs_list] for k in outputs_list[0]})
+        self.assertEqual(expected_src_tokens, batch["input_ids"][0])
+        self.assertEqual(expected_tgt_tokens, batch["labels"][0])
 
-            self.assertListEqual(outputs_batch["text"], outputs_batch_2["text"])
+#commented due to testing fast tokenizer
+    # def test_token_type_ids(self):
+    #     src_text_1 = ["A first paragraph for summarization."]
+    #     src_text_2 = ["A second paragraph for summarization."]
 
-            def recursive_check(list_or_dict_1, list_or_dict_2):
-                if isinstance(list_or_dict_1, list):
-                    [recursive_check(l1, l2) for l1, l2 in zip(list_or_dict_1, list_or_dict_2)]
-                self.assertEqual(list_or_dict_1, list_or_dict_2)
+    #     fast_token_type_ids = self.t5_base_tokenizer_fast(
+    #         src_text_1, src_text_2, add_special_tokens=True, return_token_type_ids=True
+    #     ).token_type_ids
+    #     slow_token_type_ids = self.speecht5_base_tokenizer(
+    #         src_text_1, src_text_2, add_special_tokens=True, return_token_type_ids=True
+    #     ).token_type_ids
 
-            if "char_offsets" in outputs_batch:
-                recursive_check(outputs_batch["char_offsets"], outputs_batch_2["char_offsets"])
+    #     self.assertEqual(slow_token_type_ids, fast_token_type_ids)
+    #     self.assertEqual(len(slow_token_type_ids[0]), 18)
 
-            if "word_offsets" in outputs_batch:
-                recursive_check(outputs_batch["word_offsets"], outputs_batch_2["word_offsets"])
+    # def test_fast_and_slow_same_result(self):
+    #     src_text = "<pad> Today is <unk> nice day </s>"
+    #     tgt_ids = [0, 1960, 19, 2, 1245, 239, 1]
+    #     tgt_text = "<pad> Today is<unk> nice day</s>"
 
-        # fmt: off
-        sample_ids = [
-            [11, 5, 15, tokenizer.pad_token_id, 15, 4, 8, 98, 32, 32, 32, 32, 4, 33, tokenizer.word_delimiter_token_id, 32, 32, 33, 34, 34],
-            [24, 22, 5, tokenizer.word_delimiter_token_id, tokenizer.word_delimiter_token_id, 24, 22, 22, 22, 4, 5, 77, tokenizer.pad_token_id, 22, 22, 4, 34, 34, 34, 34],
-        ]
-        # fmt: on
+    #     fast_ids = self.t5_base_tokenizer_fast(src_text, add_special_tokens=False).input_ids
+    #     slow_ids = self.speecht5_base_tokenizer(src_text, add_special_tokens=False).input_ids
+    #     self.assertEqual(tgt_ids, fast_ids)
+    #     self.assertEqual(tgt_ids, slow_ids)
 
-        # We assume that `decode` works as expected. All we will check now is
-        # the output type is correct and the output is identical to `decode`
+    #     fast_text = self.t5_base_tokenizer_fast.decode(fast_ids)
+    #     slow_text = self.speecht5_base_tokenizer.decode(fast_ids)
+    #     self.assertEqual(tgt_text, fast_text)
+    #     self.assertEqual(tgt_text, slow_text)
 
-        # char
-        outputs_char_batch = tokenizer.batch_decode(sample_ids, output_char_offsets=True)
-        outputs_char = [tokenizer.decode(ids, output_char_offsets=True) for ids in sample_ids]
-        check_list_tuples_equal(outputs_char_batch, outputs_char)
+    def test_special_tokens_initialization(self):
+        for tokenizer, pretrained_name, kwargs in self.tokenizers_list:
+            with self.subTest(f"{tokenizer.__class__.__name__} ({pretrained_name})"):
 
-        # word
-        outputs_word_batch = tokenizer.batch_decode(sample_ids, output_word_offsets=True)
-        outputs_word = [tokenizer.decode(ids, output_word_offsets=True) for ids in sample_ids]
-        check_list_tuples_equal(outputs_word_batch, outputs_word)
+                added_tokens = [f"<extra_id_{i}>" for i in range(100)] + [AddedToken("<special>", lstrip=True)]
 
-        # both
-        outputs_batch = tokenizer.batch_decode(sample_ids, output_char_offsets=True, output_word_offsets=True)
-        outputs = [tokenizer.decode(ids, output_word_offsets=True, output_char_offsets=True) for ids in sample_ids]
-        check_list_tuples_equal(outputs_batch, outputs)
-
-    def test_offsets_integration(self):
-        tokenizer = self.tokenizer_class.from_pretrained("TODO")
-        # pred_ids correspond to the following code
-        # ```
-        #        from transformers import AutoTokenizer, AutoFeatureExtractor, AutoModelForCTC
-        #        from datasets import load_dataset
-        #        import datasets
-        #        import torch
-        #        model = AutoModelForCTC.from_pretrained("TODO")
-        #        feature_extractor = AutoFeatureExtractor.from_pretrained("TODO")
-        #
-        #        ds = load_dataset("common_voice", "en", split="train", streaming=True)
-        #        ds = ds.cast_column("audio", datasets.Audio(sampling_rate=16_000))
-        #        ds_iter = iter(ds)
-        #        sample = next(ds_iter)
-        #
-        #        input_values = feature_extractor(sample["audio"]["array"], return_tensors="pt").input_values
-        #        logits = model(input_values).logits
-        #        pred_ids = torch.argmax(logits, axis=-1).cpu().tolist()
-        # ```
-        # fmt: off
-        pred_ids = [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18, 11, 0, 0, 0, 22, 0, 0, 4, 4, 4, 14, 0, 0, 0, 0, 0, 8, 8, 0, 5, 5, 0, 12, 0, 4, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 17, 0, 0, 10, 0, 0, 0, 15, 0, 0, 10, 0, 0, 0, 12, 0, 0, 0, 0, 0, 7, 0, 9, 0, 0, 14, 0, 0, 0, 13, 0, 7, 0, 0, 4, 4, 0, 15, 8, 8, 0, 0, 8, 0, 26, 0, 0, 4, 4, 0, 0, 15, 0, 0, 0, 0, 0, 0, 10, 0, 26, 5, 5, 0, 4, 4, 0, 0, 12, 11, 0, 0, 5, 4, 4, 4, 0, 18, 0, 0, 0, 7, 9, 9, 0, 6, 0, 12, 12, 4, 4, 0, 6, 0, 0, 8, 0, 4, 4, 4, 0, 19, 0, 0, 8, 9, 9, 0, 0, 0, 0, 12, 12, 0, 0, 0, 0, 0, 0, 0, 16, 16, 0, 0, 17, 5, 5, 5, 0, 4, 4, 4, 0, 0, 29, 29, 0, 0, 0, 0, 8, 11, 0, 9, 9, 0, 0, 0, 4, 4, 0, 12, 12, 0, 0, 0, 9, 0, 0, 0, 0, 0, 8, 18, 0, 0, 0, 4, 4, 0, 0, 8, 9, 0, 4, 4, 0, 6, 11, 5, 0, 4, 4, 0, 13, 13, 0, 0, 0, 10, 0, 0, 25, 0, 0, 6, 0, 4, 4, 0, 0, 0, 0, 7, 0, 0, 23, 0, 0, 4, 4, 0, 0, 0, 6, 11, 0, 5, 4, 4, 18, 0, 0, 0, 0, 0, 0, 7, 15, 0, 0, 0, 15, 15, 0, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]
-
-        # speecht5-base downsamples input audio by a factor of 320
-        # sampling rate for speecht5-base is 16_000
-        time_offset_speecht5_base = 320 / 16_000
-
-        expected_char_time_stamps_text = ['W', 'H', 'Y', ' ', 'D', 'O', 'E', 'S', ' ', 'M', 'I', 'L', 'I', 'S', 'A', 'N', 'D', 'R', 'A', ' ', 'L', 'O', 'O', 'K', ' ', 'L', 'I', 'K', 'E', ' ', 'S', 'H', 'E', ' ', 'W', 'A', 'N', 'T', 'S', ' ', 'T', 'O', ' ', 'C', 'O', 'N', 'S', 'U', 'M', 'E', ' ', 'J', 'O', 'H', 'N', ' ', 'S', 'N', 'O', 'W', ' ', 'O', 'N', ' ', 'T', 'H', 'E', ' ', 'R', 'I', 'V', 'T', ' ', 'A', 'P', ' ', 'T', 'H', 'E', ' ', 'W', 'A', 'L', 'L', ' ']
-        expected_char_time_stamps_start = [1.42, 1.44, 1.52, 1.58, 1.64, 1.76, 1.82, 1.88, 1.92, 2.26, 2.32, 2.4, 2.46, 2.54, 2.66, 2.7, 2.76, 2.84, 2.88, 2.94, 3.0, 3.02, 3.1, 3.14, 3.2, 3.28, 3.42, 3.46, 3.48, 3.54, 3.62, 3.64, 3.7, 3.72, 3.8, 3.88, 3.9, 3.96, 4.0, 4.04, 4.1, 4.16, 4.2, 4.28, 4.34, 4.36, 4.48, 4.66, 4.74, 4.76, 4.84, 4.94, 5.06, 5.08, 5.12, 5.22, 5.28, 5.38, 5.5, 5.52, 5.6, 5.68, 5.7, 5.74, 5.8, 5.82, 5.84, 5.88, 5.94, 6.04, 6.1, 6.16, 6.2, 6.32, 6.38, 6.44, 6.54, 6.56, 6.6, 6.62, 6.66, 6.8, 6.82, 6.9, 6.96]
-        expected_char_time_stamps_end = [1.44, 1.46, 1.54, 1.64, 1.66, 1.8, 1.86, 1.9, 2.06, 2.28, 2.34, 2.42, 2.48, 2.56, 2.68, 2.72, 2.78, 2.86, 2.9, 2.98, 3.02, 3.06, 3.12, 3.16, 3.24, 3.3, 3.44, 3.48, 3.52, 3.58, 3.64, 3.66, 3.72, 3.78, 3.82, 3.9, 3.94, 3.98, 4.04, 4.08, 4.12, 4.18, 4.26, 4.3, 4.36, 4.4, 4.52, 4.7, 4.76, 4.82, 4.9, 4.98, 5.08, 5.1, 5.16, 5.26, 5.32, 5.4, 5.52, 5.54, 5.64, 5.7, 5.72, 5.78, 5.82, 5.84, 5.86, 5.92, 5.98, 6.06, 6.12, 6.18, 6.24, 6.34, 6.4, 6.48, 6.56, 6.58, 6.62, 6.66, 6.68, 6.82, 6.84, 6.94, 7.02]
-
-        expected_word_time_stamps_text = ['WHY', 'DOES', 'MILISANDRA', 'LOOK', 'LIKE', 'SHE', 'WANTS', 'TO', 'CONSUME', 'JOHN', 'SNOW', 'ON', 'THE', 'RIVT', 'AP', 'THE', 'WALL']
-        expected_word_time_stamps_start = [1.42, 1.64, 2.26, 3.0, 3.28, 3.62, 3.8, 4.1, 4.28, 4.94, 5.28, 5.68, 5.8, 5.94, 6.32, 6.54, 6.66]
-        expected_word_time_stamps_end = [1.54, 1.9, 2.9, 3.16, 3.52, 3.72, 4.04, 4.18, 4.82, 5.16, 5.54, 5.72, 5.86, 6.18, 6.4, 6.62, 6.94]
-        # fmt: on
-
-        output = tokenizer.batch_decode(pred_ids, output_char_offsets=True, output_word_offsets=True)
-
-        char_offsets_text = self.get_from_offsets(output["char_offsets"][0], "char")
-        char_offsets_start = self.get_from_offsets(output["char_offsets"][0], "start_offset")
-        char_offsets_end = self.get_from_offsets(output["char_offsets"][0], "end_offset")
-
-        word_offsets_text = self.get_from_offsets(output["word_offsets"][0], "word")
-        word_offsets_start = self.get_from_offsets(output["word_offsets"][0], "start_offset")
-        word_offsets_end = self.get_from_offsets(output["word_offsets"][0], "end_offset")
-
-        # let's transform offsets to time stamps in seconds
-        char_time_stamps_start = [round(c * time_offset_speecht5_base, 2) for c in char_offsets_start]
-        char_time_stamps_end = [round(c * time_offset_speecht5_base, 2) for c in char_offsets_end]
-
-        word_time_stamps_start = [round(w * time_offset_speecht5_base, 2) for w in word_offsets_start]
-        word_time_stamps_end = [round(w * time_offset_speecht5_base, 2) for w in word_offsets_end]
-
-        # NOTE: you can verify the above results by checking out the dataset viewer
-        # on https://huggingface.co/datasets/common_voice/viewer/en/train and
-        # downloading / playing the sample `common_voice_en_100038.mp3`. As
-        # you can hear the time-stamps match more or less
-
-        self.assertListEqual(expected_char_time_stamps_text, char_offsets_text)
-        self.assertListEqual(expected_char_time_stamps_start, char_time_stamps_start)
-        self.assertListEqual(expected_char_time_stamps_end, char_time_stamps_end)
-
-        self.assertListEqual(expected_word_time_stamps_text, word_offsets_text)
-        self.assertListEqual(expected_word_time_stamps_start, word_time_stamps_start)
-        self.assertListEqual(expected_word_time_stamps_end, word_time_stamps_end)
-
-    def test_pretrained_model_lists(self):
-        # SpeechT5Model has no max model length => no testing
-        pass
-
-    # overwrite from test_tokenization_common
-    def test_add_tokens_tokenizer(self):
-        tokenizers = self.get_tokenizers(do_lower_case=False)
-        for tokenizer in tokenizers:
-            with self.subTest(f"{tokenizer.__class__.__name__}"):
-                vocab_size = tokenizer.vocab_size
-                all_size = len(tokenizer)
-
-                self.assertNotEqual(vocab_size, 0)
-
-                # We usually have added tokens from the start in tests because our vocab fixtures are
-                # smaller than the original vocabs - let's not assert this
-                # self.assertEqual(vocab_size, all_size)
-
-                new_toks = ["aaaaa bbbbbb", "cccccccccdddddddd"]
-                added_toks = tokenizer.add_tokens(new_toks)
-                vocab_size_2 = tokenizer.vocab_size
-                all_size_2 = len(tokenizer)
-
-                self.assertNotEqual(vocab_size_2, 0)
-                self.assertEqual(vocab_size, vocab_size_2)
-                self.assertEqual(added_toks, len(new_toks))
-                self.assertEqual(all_size_2, all_size + len(new_toks))
-
-                tokens = tokenizer.encode("aaaaa bbbbbb low cccccccccdddddddd l", add_special_tokens=False)
-
-                self.assertGreaterEqual(len(tokens), 4)
-                self.assertGreater(tokens[0], tokenizer.vocab_size - 1)
-                self.assertGreater(tokens[-3], tokenizer.vocab_size - 1)
-
-                new_toks_2 = {"eos_token": ">>>>|||<||<<|<<", "pad_token": "<<<<<|||>|>>>>|>"}
-                added_toks_2 = tokenizer.add_special_tokens(new_toks_2)
-                vocab_size_3 = tokenizer.vocab_size
-                all_size_3 = len(tokenizer)
-
-                self.assertNotEqual(vocab_size_3, 0)
-                self.assertEqual(vocab_size, vocab_size_3)
-                self.assertEqual(added_toks_2, len(new_toks_2))
-                self.assertEqual(all_size_3, all_size_2 + len(new_toks_2))
-
-                tokens = tokenizer.encode(
-                    ">>>>|||<||<<|<< aaaaabbbbbb low cccccccccdddddddd <<<<<|||>|>>>>|> l", add_special_tokens=False
+                tokenizer_r = self.rust_tokenizer_class.from_pretrained(
+                    pretrained_name, additional_special_tokens=added_tokens, **kwargs
+                )
+                tokenizer_cr = self.rust_tokenizer_class.from_pretrained(
+                    pretrained_name, additional_special_tokens=added_tokens, **kwargs, from_slow=True
+                )
+                tokenizer_p = self.tokenizer_class.from_pretrained(
+                    pretrained_name, additional_special_tokens=added_tokens, **kwargs
                 )
 
-                self.assertGreaterEqual(len(tokens), 6)
-                self.assertGreater(tokens[0], tokenizer.vocab_size - 1)
-                self.assertGreater(tokens[0], tokens[1])
-                self.assertGreater(tokens[-3], tokenizer.vocab_size - 1)
-                self.assertGreater(tokens[-3], tokens[-4])
-                self.assertEqual(tokens[0], tokenizer.eos_token_id)
-                self.assertEqual(tokens[-3], tokenizer.pad_token_id)
+                p_output = tokenizer_p.encode("Hey this is a <special> token")
+                r_output = tokenizer_r.encode("Hey this is a <special> token")
+                cr_output = tokenizer_cr.encode("Hey this is a <special> token")
 
-    @unittest.skip("The tokenizer shouldn't be used to encode input IDs (except for labels), only to decode.")
-    def test_tf_encode_plus_sent_to_model(self):
-        pass
+                special_token_id = tokenizer_r.encode("<special>", add_special_tokens=False)[0]
 
-    @unittest.skip("The tokenizer shouldn't be used to encode input IDs (except for labels), only to decode.")
-    def test_torch_encode_plus_sent_to_model(self):
-        pass
+                self.assertEqual(p_output, r_output)
+                self.assertEqual(cr_output, r_output)
+                self.assertTrue(special_token_id in p_output)
+                self.assertTrue(special_token_id in r_output)
+                self.assertTrue(special_token_id in cr_output)
 
-    def test_convert_tokens_to_string_format(self):
-        # The default common tokenizer tests assumes that the output of `convert_tokens_to_string` is a string which
-        # is not the case for Wav2vec2.
-        tokenizers = self.get_tokenizers(fast=True, do_lower_case=True)
-        for tokenizer in tokenizers:
-            with self.subTest(f"{tokenizer.__class__.__name__}"):
-                tokens = ["T", "H", "I", "S", "|", "I", "S", "|", "A", "|", "T", "E", "X", "T"]
-                output = tokenizer.convert_tokens_to_string(tokens)
+    def test_special_tokens_initialization_with_non_empty_additional_special_tokens(self):
+        tokenizer_list = []
+        if self.test_slow_tokenizer:
+            tokenizer_list.append((self.tokenizer_class, self.get_tokenizer()))
 
-                self.assertIsInstance(output["text"], str)
+        if self.test_rust_tokenizer:
+            tokenizer_list.append((self.rust_tokenizer_class, self.get_rust_tokenizer()))
+
+        for tokenizer_class, tokenizer_utils in tokenizer_list:
+
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                tokenizer_utils.save_pretrained(tmp_dir)
+
+                with open(os.path.join(tmp_dir, "special_tokens_map.json"), encoding="utf-8") as json_file:
+                    special_tokens_map = json.load(json_file)
+
+                with open(os.path.join(tmp_dir, "tokenizer_config.json"), encoding="utf-8") as json_file:
+                    tokenizer_config = json.load(json_file)
+
+                added_tokens_extra_ids = [f"<extra_id_{i}>" for i in range(100)]
+
+                special_tokens_map["additional_special_tokens"] = added_tokens_extra_ids + [
+                    "an_additional_special_token"
+                ]
+                tokenizer_config["additional_special_tokens"] = added_tokens_extra_ids + [
+                    "an_additional_special_token"
+                ]
+
+                with open(os.path.join(tmp_dir, "special_tokens_map.json"), "w", encoding="utf-8") as outfile:
+                    json.dump(special_tokens_map, outfile)
+                with open(os.path.join(tmp_dir, "tokenizer_config.json"), "w", encoding="utf-8") as outfile:
+                    json.dump(tokenizer_config, outfile)
+
+                # the following checks allow us to verify that our test works as expected, i.e. that the tokenizer takes
+                # into account the new value of additional_special_tokens given in the "tokenizer_config.json" and
+                # "special_tokens_map.json" files
+                tokenizer_without_change_in_init = tokenizer_class.from_pretrained(
+                    tmp_dir,
+                )
+                self.assertIn(
+                    "an_additional_special_token", tokenizer_without_change_in_init.additional_special_tokens
+                )
+                # self.assertIn("an_additional_special_token",tokenizer_without_change_in_init.get_vocab()) # ByT5Tokenization no vocab
+                self.assertEqual(
+                    ["an_additional_special_token"],
+                    tokenizer_without_change_in_init.convert_ids_to_tokens(
+                        tokenizer_without_change_in_init.convert_tokens_to_ids(["an_additional_special_token"])
+                    ),
+                )
+
+                # Now we test that we can change the value of additional_special_tokens in the from_pretrained
+                new_added_tokens = added_tokens_extra_ids + [AddedToken("a_new_additional_special_token", lstrip=True)]
+                tokenizer = tokenizer_class.from_pretrained(
+                    tmp_dir,
+                    additional_special_tokens=new_added_tokens,
+                )
+
+                self.assertIn("a_new_additional_special_token", tokenizer.additional_special_tokens)
+                self.assertEqual(
+                    ["a_new_additional_special_token"],
+                    tokenizer.convert_ids_to_tokens(
+                        tokenizer.convert_tokens_to_ids(["a_new_additional_special_token"])
+                    ),
+                )
+
+    # overwritten from `test_tokenization_common` since T5 has no max length
+    def test_pretrained_model_lists(self):
+        # We should have at least one default checkpoint for each tokenizer
+        # We should specify the max input length as well (used in some part to list the pretrained checkpoints)
+        self.assertGreaterEqual(len(self.tokenizer_class.pretrained_vocab_files_map), 1)
+        self.assertGreaterEqual(len(list(self.tokenizer_class.pretrained_vocab_files_map.values())[0]), 1)
+
+    @slow
+    def test_tokenizer_integration(self):
+        # fmt: off
+        expected_encoding = {'input_ids': [[31220, 7, 41, 14034, 801, 38, 3, 102, 63, 17, 127, 524, 18, 7031, 2032, 277, 11, 3, 102, 63, 17, 127, 524, 18, 2026, 17, 10761, 18, 7041, 61, 795, 879, 18, 19681, 4648, 7, 41, 12920, 382, 6, 350, 6383, 4949, 6, 2158, 12920, 382, 9, 6, 3, 4, 11160, 6, 2043, 17153, 279, 49, 17, 6, 3, 4, 434, 9688, 11439, 21, 6869, 10509, 17725, 41, 567, 9138, 61, 11, 6869, 10509, 11946, 41, 18207, 517, 61, 28, 147, 3538, 1220, 7140, 10761, 2250, 16, 910, 1220, 8024, 11, 1659, 1413, 32, 883, 2020, 344, 2215, 226, 6, 12901, 382, 127, 524, 11, 4738, 7, 127, 15390, 5, 1], [272, 24203, 19, 876, 12, 554, 18, 9719, 1659, 2647, 26352, 6497, 7, 45, 73, 9339, 400, 26, 1499, 57, 22801, 10760, 30, 321, 646, 11, 269, 2625, 16, 66, 7500, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [37, 1704, 4216, 3, 20400, 4418, 7, 147, 8, 19743, 1782, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], 'attention_mask': [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]}  # noqa: E501
+        # fmt: on
+
+        self.tokenizer_integration_test_util(
+            expected_encoding=expected_encoding,
+            model_name="t5-base",
+            revision="5a7ff2d8f5117c194c7e32ec1ccbf04642cca99b",
+        )
